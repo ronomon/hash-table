@@ -21,7 +21,7 @@
     "flood",
     "gc",
     "hash",
-    "index"
+    "index",
     "load",
     "lru",
     "miss",
