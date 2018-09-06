@@ -1,0 +1,46 @@
+{
+  "name": "@ronomon/hash-table",
+  "version": "1.0.0",
+  "description": "Fast, reliable cuckoo hash table for Node.js",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ronomon/hash-table.git"
+  },
+  "keywords": [
+    "binary",
+    "bloom",
+    "buffer",
+    "bucket",
+    "bucketized",
+    "cache",
+    "clock",
+    "cuckoo",
+    "element",
+    "filter",
+    "flood",
+    "gc",
+    "hash",
+    "index"
+    "load",
+    "lru",
+    "miss",
+    "probing",
+    "reserve",
+    "resize",
+    "slot",
+    "tabulation",
+    "table",
+    "tag"
+  ],
+  "author": "Joran Dirk Greef",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ronomon/hash-table/issues"
+  },
+  "homepage": "https://github.com/ronomon/hash-table#readme",
+  "scripts": {
+    "test": "node test.js"
+  },
+  "dependencies": {}
+}
