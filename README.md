@@ -11,12 +11,13 @@ npm install @ronomon/hash-table
 
 ## Motivation
 
-Why not use a vanilla Javascript object as a hash table?
+Why not use a vanilla Javascript object (or Set or Map) as a hash table?
 
-* A vanilla object has no interface to pre-allocate table capacity in advance.
-If the Javascript engine's underlying implementation of a vanilla object is a
-hash table, then a vanilla object must resize multiple times (copying every key
-and value multiple times) while you insert millions of elements.
+* A vanilla object has no interface to pre-allocate table capacity in advance,
+and a Set or Map constructor only accepts an iterable. If the Javascript
+engine's underlying implementation of a vanilla object is a hash table, then a
+vanilla object must resize multiple times (copying every key and value multiple
+times) while you insert millions of elements.
 
 * A vanilla object has no concept of binary keys. Encoding binary keys as
 hexadecimal or Base64 strings is slow, and Javascript strings have additional
@@ -36,13 +37,18 @@ Ignoring any GC implications or per-key memory overhead considerations, which
 are more serious:
 
 ```
+
                        keySize=16 valueSize=0
 
   @ronomon/hash-table: Inserting 4000000 elements...
-  @ronomon/hash-table: 771ms
+  @ronomon/hash-table: 783ms
+
+            new Set(): Inserting 4000000 elements...
+            new Set(): 3695ms
 
        vanilla object: Inserting 4000000 elements...
-       vanilla object: 5334ms
+       vanilla object: 5557ms
+
 ```
 
 ## Fast

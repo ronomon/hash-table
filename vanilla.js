@@ -1,4 +1,4 @@
-// An indication of the pitfalls of using a vanilla object as a hash table:
+// A comparison with a vanilla Javascript object (and Set):
 
 var HashTable = require('./index.js');
 var Node = { crypto: require('crypto') };
@@ -22,6 +22,18 @@ while (length--) {
   offset += element;
 }
 console.log('  @ronomon/hash-table: ' + (Date.now() - now) + 'ms');
+console.log('');
+
+console.log('            new Set(): Inserting ' + elements + ' elements...');
+var now = Date.now();
+var set = new Set();
+var offset = 0;
+var length = elements;
+while (length--) {
+  set.add(buffer.slice(offset, offset + keySize));
+  offset += element;
+}
+console.log('            new Set(): ' + (Date.now() - now) + 'ms');
 console.log('');
 
 console.log('       vanilla object: Inserting ' + elements + ' elements...');
