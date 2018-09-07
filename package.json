@@ -1,6 +1,6 @@
 {
   "name": "@ronomon/hash-table",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Fast, reliable cuckoo hash table for Node.js",
   "main": "index.js",
   "repository": {
