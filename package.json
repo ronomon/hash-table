@@ -8,6 +8,8 @@
     "url": "git+https://github.com/ronomon/hash-table.git"
   },
   "keywords": [
+    "array",
+    "associative",
     "binary",
     "bloom",
     "buffer",
@@ -15,6 +17,7 @@
     "bucketized",
     "cache",
     "clock",
+    "container",
     "cuckoo",
     "element",
     "filter",
@@ -24,7 +27,9 @@
     "index",
     "load",
     "lru",
+    "map",
     "miss",
+    "object",
     "probing",
     "reserve",
     "resize",
