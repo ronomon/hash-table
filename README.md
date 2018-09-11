@@ -238,7 +238,7 @@ removed.
 **hashTable.cache(key, keyOffset, value, valueOffset)**
 
 Similar to `set()` but inserts by evicting a least recently used element, rather
-than resizing the hash table. `cache()` will never resize the hash table.
+than resizing the hash table.
 
 * `key` A buffer, contains the key to be inserted or updated.
 * `keyOffset` An integer, the offset into `key` at which the key begins.
@@ -247,12 +247,14 @@ than resizing the hash table. `cache()` will never resize the hash table.
 * Returns an integer, `0` if the element was inserted, `1` if the element was
 updated, `2` if the element was inserted by evicting another element.
 
-*The `set()` and `cache()` methods are mutually exclusive and cannot be used on
-the same hash table instance. This restriction is in place to prevent the user
-from accidentally evicting elements which were inserted by `set()`, and to
-enable several caching optimizations. When using the `cache()` method, you can
-still use the `get()`, `exist()` and `unset()` methods to retrieve, test and
-remove cached elements.*
+*`cache()` will never resize the hash table. Use the same `elementsMin` and
+`elementsMax` arguments to size the hash table appropriately.*
+
+*`cache()` and `set()` are mutually exclusive and cannot be used on the same
+hash table instance. This restriction is in place to prevent the user from
+accidentally evicting elements which were inserted by `set()`, and to enable
+several caching optimizations. When using `cache()`, you can still use `get()`,
+`exist()` and `unset()` to retrieve, test and remove cached elements.*
 
 **hashTable.capacity**
 
