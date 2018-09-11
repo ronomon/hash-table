@@ -81,35 +81,50 @@ var TABLE = (function() {
 // A fallback for when valueSize is 0 and the user does not pass a value buffer:
 var VALUE = Buffer.alloc(0);
 
-function HashTable(keySize, valueSize, buffers=8, elements=1024, size=0) {
+function HashTable(keySize, valueSize, elementsMin=1024, elementsMax=0) {
   Assert.GE('keySize', keySize, HashTable.KEY_MIN);
   Assert.LE('keySize', keySize, HashTable.KEY_MAX);
+  // We optimize the hash function significantly given key is a multiple of 4:
+  if (keySize % 4) throw new Error('keySize must be a multiple of 4');
   Assert.GE('valueSize', valueSize, HashTable.VALUE_MIN);
   Assert.LE('valueSize', valueSize, HashTable.VALUE_MAX);
+  Assert.GE('elementsMin', elementsMin, HashTable.ELEMENTS_MIN);
+  Assert.LE('elementsMin', elementsMin, HashTable.ELEMENTS_MAX);
+  if (elementsMax === 0) {
+    elementsMax = Math.max(elementsMin + 4194304, elementsMin * 1024);
+    elementsMax = Math.min(elementsMax, HashTable.ELEMENTS_MAX);
+  }
+  Assert.GE('elementsMax', elementsMax, 1);
+  Assert.GE('elementsMax', elementsMax, elementsMin);
+  Assert.LE('elementsMax', elementsMax, HashTable.ELEMENTS_MAX);
+  var capacityMin = HashTable.capacity(elementsMin);
+  var capacityMax = HashTable.capacity(elementsMax);
+  var buffers = HashTable.buffers(keySize, valueSize, capacityMax);
   Assert.GE('buffers', buffers, HashTable.BUFFERS_MIN);
   Assert.LE('buffers', buffers, HashTable.BUFFERS_MAX);
   Assert.P2('buffers', buffers);
-  Assert.GE('elements', elements, HashTable.ELEMENTS_MIN);
-  Assert.LE('elements', elements, HashTable.ELEMENTS_MAX);
-  Assert.GE('size', size, HashTable.SIZE_MIN);
-  Assert.LE('size', size, HashTable.SIZE_MAX);
-  // We can optimize the hash function significantly if key is a multiple of 4:
-  if (keySize % 4) throw new Error('keySize must be a multiple of 4');
+  var buckets = HashTable.buckets(capacityMin, buffers);
+  if (buckets > HashTable.BUCKETS_MAX) buckets = HashTable.BUCKETS_MAX;
+  Assert.GE('buckets', buckets, HashTable.BUCKETS_MIN);
+  Assert.LE('buckets', buckets, HashTable.BUCKETS_MAX);
+  Assert.P2('buckets', buckets);
   this.keySize = keySize;
   this.valueSize = valueSize;
-  this.tables = new Array(buffers);
   this.bucket = HashTable.bucket(keySize, valueSize);
-  var buckets = HashTable.buckets(this.bucket, buffers, elements, size);
-  if (buckets * this.bucket > HashTable.BUFFER_MAX) {
-    throw new Error(HashTable.ERROR_MAXIMUM_CAPACITY_EXCEEDED);
-  }
-  for (var offset = 0; offset < buffers; offset++) {
-    this.tables[offset] = new Table(keySize, valueSize, this.bucket, buckets);
-  }
   this.capacity = buffers * buckets * 8;
   this.length = 0;
   this.mask = buffers - 1;
   this.mode = 0; // 1 = resizing with set(), 2 = evicting with cache().
+  if (
+    this.capacity < elementsMin ||
+    this.bucket * buckets > HashTable.BUFFER_MAX
+  ) {
+    throw new Error(HashTable.ERROR_MAXIMUM_CAPACITY_EXCEEDED);
+  }
+  this.tables = new Array(buffers);
+  for (var offset = 0; offset < buffers; offset++) {
+    this.tables[offset] = new Table(keySize, valueSize, this.bucket, buckets);
+  }
 }
 
 HashTable.prototype.cache = function(key, keyOffset, value, valueOffset) {
@@ -201,19 +216,21 @@ HashTable.prototype.unset = function(key, keyOffset) {
 HashTable.KEY_MIN = 4;
 HashTable.KEY_MAX = 64;
 HashTable.VALUE_MIN = 0;
-HashTable.VALUE_MAX = 67108864;
+HashTable.VALUE_MAX = 1048576; // See comments in HashTable.buffers().
 HashTable.BUFFERS_MIN = 1;
 HashTable.BUFFERS_MAX = 8192; // Javascript Arrays degrade at 10,000 elements.
 HashTable.ELEMENTS_MIN = 0;
-HashTable.ELEMENTS_MAX = 68719476736;
-HashTable.SIZE_MIN = 0;
-HashTable.SIZE_MAX = 1024 * 1024 * 1024 * 1024;
+HashTable.ELEMENTS_MAX = 4294967296;
 HashTable.BUCKETS_MIN = 2;
 HashTable.BUCKETS_MAX = 65536;
 HashTable.BUFFER_MAX = require('buffer').kMaxLength;
 Assert.GE('BUFFER_MAX', HashTable.BUFFER_MAX, 0);
 Assert.LE('BUFFER_MAX', HashTable.BUFFER_MAX, Math.pow(2, 32) - 1);
-
+Assert.LE(
+  'ELEMENTS_MAX',
+  HashTable.ELEMENTS_MAX,
+  HashTable.BUFFERS_MAX * HashTable.BUCKETS_MAX * 8
+);
 Assert.GE('SLOT.length', SLOT.length, 256);
 Assert.LE('SLOT.length', SLOT.length, 256);
 Assert.GE('TABLE.length', TABLE.length, HashTable.KEY_MAX * 256 * 2);
@@ -234,43 +251,105 @@ HashTable.ERROR_MODE = 'cache() and set() methods are mutually exclusive';
 // This might indicate an adversarial attack, or weak tabulation hash entropy:
 HashTable.ERROR_SET = 'set() failed despite multiple resize attempts';
 
+// The size of a cache-aligned bucket, given keySize and valueSize:
 HashTable.bucket = function(keySize, valueSize) {
   Assert.GE('keySize', keySize, HashTable.KEY_MIN);
   Assert.LE('keySize', keySize, HashTable.KEY_MAX);
+  if (keySize % 4) throw new Error('keySize must be a multiple of 4');
   Assert.GE('valueSize', valueSize, HashTable.VALUE_MIN);
   Assert.LE('valueSize', valueSize, HashTable.VALUE_MAX);
-  if (keySize % 4) throw new Error('keySize must be a multiple of 4');
   // Bucket includes padding for 64-byte cache line alignment:
   var bucket = Math.ceil((20 + (keySize + valueSize) * 8) / 64) * 64;
   Assert.GE('bucket', bucket, 0);
   return bucket;
 };
 
-HashTable.buckets = function(bucket, buffers, elements, size) {
-  Assert.GE('bucket', bucket, 20 + HashTable.KEY_MIN * 8);
-  if (bucket % 64) throw new Error('bucket must be a multiple of 64');
+// The number of buckets required to support elements at 100% load factor:
+HashTable.buckets = function(elements, buffers) {
+  Assert.GE('elements', elements, HashTable.ELEMENTS_MIN);
+  Assert.LE('elements', elements, HashTable.ELEMENTS_MAX);  
   Assert.GE('buffers', buffers, HashTable.BUFFERS_MIN);
   Assert.LE('buffers', buffers, HashTable.BUFFERS_MAX);
   Assert.P2('buffers', buffers);
-  Assert.GE('elements', elements, HashTable.ELEMENTS_MIN);
-  Assert.LE('elements', elements, HashTable.ELEMENTS_MAX);
-  Assert.GE('size', size, HashTable.SIZE_MIN);
-  Assert.LE('size', size, HashTable.SIZE_MAX);
-  // Allocate buckets based on the total size or expected number of elements:
-  if (size > 0) {
-    // Use floor() to avoid exceeding size:
-    var power = Math.floor(Math.log2(Math.max(1, size / buffers / bucket)));
-  } else {
-    // Use ceil() to avoid resizing:
-    var power = Math.ceil(Math.log2(Math.max(1, elements * 1.1 / buffers / 8)));
-  }
-  var buckets = Math.pow(2, power);
-  if (buckets < HashTable.BUCKETS_MIN) buckets = HashTable.BUCKETS_MIN;
-  if (buckets > HashTable.BUCKETS_MAX) buckets = HashTable.BUCKETS_MAX;
+  var power = Math.ceil(Math.log2(Math.max(1, elements / 8 / buffers)));
+  var buckets = Math.max(HashTable.BUCKETS_MIN, Math.pow(2, power));
   Assert.GE('buckets', buckets, HashTable.BUCKETS_MIN);
-  Assert.LE('buckets', buckets, HashTable.BUCKETS_MAX);
+  // Buckets may exceed BUCKETS_MAX here so that buffers() can call buckets().
   Assert.P2('buckets', buckets);
   return buckets;
+};
+
+// The number of buffers required to support elements at 100% load factor:
+HashTable.buffers = function(keySize, valueSize, elements) {
+  // Objectives:
+  //
+  // 1. Maximize the number of buckets (>= 64) for maximum load factor.
+  // 2. Minimize the number of buffers for less pointer overhead.
+  //  
+  // The number of buckets places an upper bound on the maximum load factor:
+  // If, at maximum capacity, the number of buckets is less than 64 then the
+  // maximum load factor will be less than 100% (even when evicting).
+  //
+  //   64 buckets enable a maximum load factor of 100%.
+  //   32 buckets enable a maximum load factor of 75%.
+  //   16 buckets enable a maximum load factor of 62.5%.
+  //    8 buckets enable a maximum load factor of 56.25%.
+  //    4 buckets enable a maximum load factor of 53.125%.
+  //    2 buckets enable a maximum load factor of 51.5625%.
+  //
+  // Large value sizes interacting with BUFFER_MAX tend toward fewer buckets:
+  //
+  // When BUFFER_MAX is 2 GB, for all key and value size configurations:
+  // A value size of 1 MB guarantees 128 buckets.
+  // A value size of 2 MB guarantees 64 buckets.
+  // A value size of 4 MB guarantees 32 buckets.
+  //
+  // When BUFFER_MAX is 1 GB:
+  // A value size of 1 MB guarantees 64 buckets.
+  // A value size of 2 MB guarantees 32 buckets.
+  // A value size of 4 MB guarantees 16 buckets.
+  // 
+  // We therefore set VALUE_MAX to 1 MB to preclude the possibility of a cache
+  // ever being artificially restricted to 75% occupancy (even when evicting).
+  //
+  // The above guarantees depend on KEY_MAX, VALUE_MAX and BUFFER_MAX:
+  Assert.LE('HashTable.KEY_MAX', HashTable.KEY_MAX, 64);
+  Assert.LE('HashTable.VALUE_MAX', HashTable.VALUE_MAX, 1048576);
+  Assert.GE('HashTable.BUFFER_MAX', HashTable.BUFFER_MAX, 1073741824 - 1);
+  Assert.GE('keySize', keySize, HashTable.KEY_MIN);
+  Assert.LE('keySize', keySize, HashTable.KEY_MAX);
+  if (keySize % 4) throw new Error('keySize must be a multiple of 4');
+  Assert.GE('valueSize', valueSize, HashTable.VALUE_MIN);
+  Assert.LE('valueSize', valueSize, HashTable.VALUE_MAX);
+  Assert.GE('elements', elements, HashTable.ELEMENTS_MIN);
+  Assert.LE('elements', elements, HashTable.ELEMENTS_MAX);
+  var bucket = HashTable.bucket(keySize, valueSize);
+  var buffers = HashTable.BUFFERS_MIN;
+  Assert.GE('buffers', buffers, 1);
+  var limit = 10000;
+  while (limit--) {
+    var buckets = HashTable.buckets(elements, buffers);
+    var buffer = buckets * bucket;
+    if (
+      (buffers === HashTable.BUFFERS_MAX) ||
+      (buckets <= HashTable.BUCKETS_MAX && buffer <= HashTable.BUFFER_MAX)
+    ) {
+      break;
+    }
+    buffers = buffers * 2;
+  }
+  Assert.GE('buffers', buffers, HashTable.BUFFERS_MIN);
+  Assert.LE('buffers', buffers, HashTable.BUFFERS_MAX);
+  Assert.P2('buffers', buffers);
+  return buffers;
+};
+
+HashTable.capacity = function(elements) {
+  Assert.GE('elements', elements, HashTable.ELEMENTS_MIN);
+  Assert.LE('elements', elements, HashTable.ELEMENTS_MAX);
+  var capacity = Math.min(Math.floor(elements * 1.3), HashTable.ELEMENTS_MAX);
+  Assert.GE('capacity', capacity, elements);
+  return capacity;
 };
 
 function Table(keySize, valueSize, bucket, buckets) {

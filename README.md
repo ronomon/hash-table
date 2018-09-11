@@ -124,14 +124,14 @@ be used as a fast user space cache**.
 * Surprisingly, the implementation is **written in Javascript** to avoid the
 [100-200ns bridging cost](https://github.com/nodejs/abi-stable-node/issues/327)
 of calling into C from Javascript. Even a C implementation making use of SIMD
-operations may struggle to regain the cost of being called from Javascript.
+instructions may struggle to regain the cost of being called from Javascript.
 
 ## Reliable
 
 `@ronomon/hash-table` was designed for billions of elements:
 
 * Each hash table instance is partitioned across multiple buffers and
-**scales linearly up to a maximum of 68,719,476,736 elements or 1 TB of
+**scales linearly up to a maximum of 4,294,967,296 elements or 16 TB of
 memory**, whichever comes first.
 
 * Exactly **2.5 bytes of overhead per element** at 100% load.
@@ -139,8 +139,8 @@ memory**, whichever comes first.
 * The implementation is purely in terms of huge flat buffer instances. Apart
 from jumping to a huge flat buffer instance, there is **no pointer chasing**.
 Most importantly, this **sidesteps memory fragmentation issues** and is **GC
-friendly**. If the GC can't look into the buffers, the GC has nothing further to
-do. This places almost zero load on the GC.
+friendly**. If the GC cannot look into the buffers, the GC has nothing further
+to do. This places almost zero load on the GC.
 
 * [Tabulation hashing](https://en.wikipedia.org/wiki/Tabulation_hashing) is used
 as a **fast high-quality hash function** instead of more popular hash functions
@@ -166,8 +166,8 @@ positive rate would approach 100%. With bloom filter partitioning, only 1/8th of
 the bucket's filter would be adversely affected.
 
 * **A maximum of 16 cuckoo displacements per insert are allowed in order to
-limit recursion** and keep the algorithm intuitive. If both buckets are full and
-no element can be displaced into another bucket, the buffer is resized by a
+limit recursion** and to keep the algorithm intuitive. If both buckets are full
+and no element can be displaced into another bucket, the buffer is resized by a
 factor of 2 to make space for the insert.
 
 * Each buffer is resized independently of other buffers so that the **resize
@@ -182,23 +182,17 @@ empty slot.
 
 ## Usage
 
-**var hashTable = new HashTable(keySize, valueSize, [buffers=8],
-[elements=1024], [size])**
+**var hashTable = new HashTable(keySize, valueSize, [elementsMin],
+[elementsMax])**
 
 * `keySize` An integer, must be a multiple of 4 bytes, up to a maximum of 64
 bytes (`HashTable.KEY_MAX`).
-* `valueSize` An integer, from 0 bytes up to a maximum of 64 MB
+* `valueSize` An integer, from 0 bytes up to a maximum of 1 MB
 (`HashTable.VALUE_MAX`).
-* `buffers` An integer, the number of hash table buffers, must be a power of 2,
-up to a maximum of 8,192 (`HashTable.BUFFERS_MAX`). Each buffer can support at
-most 65,536 buckets, or 524,288 elements (`65536 * 8`) and can be resized to at
-most `HashTable.BUFFER_MAX`, whichever comes first.
-* `elements` An integer, reserve or pre-allocate the hash table according to the
-number of elements expected to be inserted to avoid unnecessary resizes.
-* `size` An integer, reserve or pre-allocate the hash table according to the
-amount of memory in bytes desired, up to a maximum of `HashTable.SIZE_MAX`
-bytes. If both `elements` and `size` are provided, then the hash table will be
-pre-allocated according to `size`.
+* `elementsMin` An integer, a *hint* as to the minimum number of elements
+expected to be inserted, to avoid unnecessary resizing over the short term.
+* `elementsMax` An integer, a *hint* as to the maximum number of elements
+expected to be inserted, to ensure sufficient capacity over the long term.
 
 **hashTable.set(key, keyOffset, value, valueOffset)**
 
@@ -243,8 +237,8 @@ removed.
 
 **hashTable.cache(key, keyOffset, value, valueOffset)**
 
-Similar to `set()` but inserts by evicting an existing least recently used
-element, rather than resizing the hash table.
+Similar to `set()` but inserts by evicting a least recently used element, rather
+than resizing the hash table. `cache()` will never resize the hash table.
 
 * `key` A buffer, contains the key to be inserted or updated.
 * `keyOffset` An integer, the offset into `key` at which the key begins.
@@ -256,15 +250,15 @@ updated, `2` if the element was inserted by evicting another element.
 *The `set()` and `cache()` methods are mutually exclusive and cannot be used on
 the same hash table instance. This restriction is in place to prevent the user
 from accidentally evicting elements which were inserted by `set()`, and to
-enable several caching optimizations. When using `cache()` to cache elements in
-a hash table, you can still use the `get()`, `exist()` and `unset()` methods to
-retrieve, test and remove cached elements.*
+enable several caching optimizations. When using the `cache()` method, you can
+still use the `get()`, `exist()` and `unset()` methods to retrieve, test and
+remove cached elements.*
 
 **hashTable.capacity**
 
 An integer, read-only, the current total capacity of the hash table, i.e. the
-number of elements which the hash table can accommodate at 100% load, increased
-through automatic resizing of the hash table buffers.
+number of elements which the hash table can accommodate at 100% load, which will
+increase through automatic resizing of the hash table buffers.
 
 **hashTable.length**
 
@@ -278,7 +272,7 @@ the capacity of the hash table.
 
 **hashTable.size**
 
-An integer, read-only, the total size of the hash table buffers in bytes.
+An integer, read-only, the total size of all hash table buffers in bytes.
 
 ### Example
 
@@ -287,10 +281,10 @@ var HashTable = require('@ronomon/hash-table');
 
 var keySize = 16;
 var valueSize = 4;
-var buffers = 64; // Optional. Partition across 64 buffers.
-var elements = 100000; // Optional. Reserve space for at least 100,000 elements.
+var elementsMin = 1024; // Optional. Reserve space for at least 1,024 elements.
+var elementsMax = 65536; // Optional. Expect at most 65,536 elements.
 
-var hashTable = new HashTable(keySize, valueSize, buffers, elements);
+var hashTable = new HashTable(keySize, valueSize, elementsMin, elementsMax);
 
 // set():
 var key = Buffer.alloc(keySize);
@@ -317,7 +311,8 @@ if (result === 0) console.log('unset(): element does not exist, not removed');
 if (result === 1) console.log('unset(): element was removed');
 
 // cache():
-var hashTable = new HashTable(keySize, valueSize, buffers, elements);
+// cache() cannot be used on the same instance as set(), reinstantiate:
+var hashTable = new HashTable(keySize, valueSize, elementsMin, elementsMax);
 var result = hashTable.cache(key, keyOffset, value, valueOffset);
 if (result === 0) console.log('cache(): element was inserted');
 if (result === 1) console.log('cache(): element was updated');
@@ -331,14 +326,14 @@ exceptions may be thrown for operating errors:
 
 **HashTable.ERROR_MAXIMUM_CAPACITY_EXCEEDED**
 
-A buffer cannot be further resized due to reaching `HashTable.BUFFER_MAX` or
-`HashTable.BUCKETS_MAX`. Partition the hash table across more buffers to spread
-the load and increase capacity.
+A hash table buffer could not be further resized due to reaching
+`HashTable.BUFFER_MAX` or `HashTable.BUCKETS_MAX`. Increase `elementsMax` when
+instantiating the hash table to ensure sufficient capacity.
 
 **HashTable.ERROR_SET**
 
-An insert failed despite multiple resize attempts. This should never happen and
-may indicate an adversarial attack, or weak system entropy.
+An insert failed despite several resize attempts. This should never happen and
+may indicate weak system entropy.
 
 ## Performance
 
@@ -349,259 +344,259 @@ may indicate an adversarial attack, or weak system entropy.
 ===============================================================================
             KEY=8 VALUE=0              |            KEY=8 VALUE=4              
 ---------------------------------------|---------------------------------------
-      set() Insert              230ns  |      set() Insert              271ns  
-      set() Reserve             132ns  |      set() Reserve             147ns  
-      set() Update              149ns  |      set() Update              167ns  
-      get() Miss                 99ns  |      get() Miss                 92ns  
-      get() Hit                 147ns  |      get() Hit                 166ns  
-    exist() Miss                 97ns  |    exist() Miss                 90ns  
-    exist() Hit                 144ns  |    exist() Hit                 144ns  
-    unset() Miss                100ns  |    unset() Miss                 92ns  
-    unset() Hit                 200ns  |    unset() Hit                 200ns  
-    cache() Insert              124ns  |    cache() Insert              139ns  
-    cache() Evict               159ns  |    cache() Evict               165ns  
-    cache() Miss                127ns  |    cache() Miss                117ns  
-    cache() Hit                 135ns  |    cache() Hit                 131ns  
+      set() Insert              228ns  |      set() Insert              269ns  
+      set() Reserve             134ns  |      set() Reserve             139ns  
+      set() Update              149ns  |      set() Update              164ns  
+      get() Miss                 99ns  |      get() Miss                100ns  
+      get() Hit                 147ns  |      get() Hit                 164ns  
+    exist() Miss                 98ns  |    exist() Miss                 99ns  
+    exist() Hit                 143ns  |    exist() Hit                 148ns  
+    unset() Miss                 98ns  |    unset() Miss                 98ns  
+    unset() Hit                 196ns  |    unset() Hit                 200ns  
+    cache() Insert              122ns  |    cache() Insert              139ns  
+    cache() Evict               153ns  |    cache() Evict               174ns  
+    cache() Miss                120ns  |    cache() Miss                133ns  
+    cache() Hit                 133ns  |    cache() Hit                 136ns  
 ===============================================================================
             KEY=8 VALUE=8              |            KEY=8 VALUE=16             
 ---------------------------------------|---------------------------------------
-      set() Insert              310ns  |      set() Insert              391ns  
-      set() Reserve             158ns  |      set() Reserve             176ns  
-      set() Update              183ns  |      set() Update              207ns  
-      get() Miss                 98ns  |      get() Miss                111ns  
-      get() Hit                 181ns  |      get() Hit                 205ns  
-    exist() Miss                 95ns  |    exist() Miss                109ns  
-    exist() Hit                 152ns  |    exist() Hit                 160ns  
-    unset() Miss                 97ns  |    unset() Miss                112ns  
-    unset() Hit                 214ns  |    unset() Hit                 231ns  
-    cache() Insert              150ns  |    cache() Insert              177ns  
-    cache() Evict               197ns  |    cache() Evict               215ns  
-    cache() Miss                144ns  |    cache() Miss                153ns  
-    cache() Hit                 147ns  |    cache() Hit                 163ns  
+      set() Insert              299ns  |      set() Insert              346ns  
+      set() Reserve             158ns  |      set() Reserve             172ns  
+      set() Update              175ns  |      set() Update              195ns  
+      get() Miss                 96ns  |      get() Miss                103ns  
+      get() Hit                 174ns  |      get() Hit                 191ns  
+    exist() Miss                 94ns  |    exist() Miss                102ns  
+    exist() Hit                 148ns  |    exist() Hit                 160ns  
+    unset() Miss                 93ns  |    unset() Miss                101ns  
+    unset() Hit                 204ns  |    unset() Hit                 224ns  
+    cache() Insert              151ns  |    cache() Insert              165ns  
+    cache() Evict               189ns  |    cache() Evict               207ns  
+    cache() Miss                150ns  |    cache() Miss                158ns  
+    cache() Hit                 146ns  |    cache() Hit                 166ns  
 ===============================================================================
             KEY=8 VALUE=32             |            KEY=8 VALUE=64             
 ---------------------------------------|---------------------------------------
-      set() Insert              483ns  |      set() Insert              774ns  
-      set() Reserve             231ns  |      set() Reserve             539ns  
-      set() Update              254ns  |      set() Update              325ns  
-      get() Miss                106ns  |      get() Miss                113ns  
-      get() Hit                 250ns  |      get() Hit                 324ns  
-    exist() Miss                104ns  |    exist() Miss                111ns  
-    exist() Hit                 173ns  |    exist() Hit                 179ns  
-    unset() Miss                107ns  |    unset() Miss                115ns  
-    unset() Hit                 261ns  |    unset() Hit                 299ns  
-    cache() Insert              218ns  |    cache() Insert              297ns  
-    cache() Evict               256ns  |    cache() Evict               307ns  
-    cache() Miss                165ns  |    cache() Miss                113ns  
-    cache() Hit                 178ns  |    cache() Hit                 164ns  
+      set() Insert              418ns  |      set() Insert              631ns  
+      set() Reserve             190ns  |      set() Reserve             275ns  
+      set() Update              225ns  |      set() Update              280ns  
+      get() Miss                104ns  |      get() Miss                111ns  
+      get() Hit                 223ns  |      get() Hit                 277ns  
+    exist() Miss                103ns  |    exist() Miss                109ns  
+    exist() Hit                 172ns  |    exist() Hit                 183ns  
+    unset() Miss                103ns  |    unset() Miss                110ns  
+    unset() Hit                 251ns  |    unset() Hit                 295ns  
+    cache() Insert              192ns  |    cache() Insert              244ns  
+    cache() Evict               229ns  |    cache() Evict               286ns  
+    cache() Miss                167ns  |    cache() Miss                179ns  
+    cache() Hit                 181ns  |    cache() Hit                 191ns  
 ===============================================================================
             KEY=8 VALUE=4096           |            KEY=8 VALUE=65536          
 ---------------------------------------|---------------------------------------
-      set() Insert             6373ns  |      set() Insert            64085ns  
-      set() Reserve            2478ns  |      set() Reserve           23030ns  
-      set() Update             1521ns  |      set() Update            20883ns  
-      get() Miss                135ns  |      get() Miss                175ns  
-      get() Hit                 834ns  |      get() Hit                7785ns  
-    exist() Miss                127ns  |    exist() Miss                170ns  
-    exist() Hit                 232ns  |    exist() Hit                 261ns  
-    unset() Miss                104ns  |    unset() Miss                 66ns  
-    unset() Hit                1095ns  |    unset() Hit               13178ns  
-    cache() Insert             1552ns  |    cache() Insert            24247ns  
-    cache() Evict              1419ns  |    cache() Evict             20395ns  
-    cache() Miss                133ns  |    cache() Miss                172ns  
-    cache() Hit                 195ns  |    cache() Hit                 225ns  
+      set() Insert             6436ns  |      set() Insert            79601ns  
+      set() Reserve            2178ns  |      set() Reserve           24260ns  
+      set() Update             1518ns  |      set() Update            20550ns  
+      get() Miss                135ns  |      get() Miss                181ns  
+      get() Hit                 828ns  |      get() Hit                7904ns  
+    exist() Miss                127ns  |    exist() Miss                171ns  
+    exist() Hit                 232ns  |    exist() Hit                 269ns  
+    unset() Miss                104ns  |    unset() Miss                 63ns  
+    unset() Hit                1088ns  |    unset() Hit               13284ns  
+    cache() Insert             1746ns  |    cache() Insert            20381ns  
+    cache() Evict              1471ns  |    cache() Evict             20526ns  
+    cache() Miss                180ns  |    cache() Miss                224ns  
+    cache() Hit                 231ns  |    cache() Hit                 283ns  
 ===============================================================================
             KEY=16 VALUE=0             |            KEY=16 VALUE=4             
 ---------------------------------------|---------------------------------------
-      set() Insert              368ns  |      set() Insert              404ns  
-      set() Reserve             172ns  |      set() Reserve             189ns  
-      set() Update              197ns  |      set() Update              209ns  
-      get() Miss                114ns  |      get() Miss                116ns  
-      get() Hit                 194ns  |      get() Hit                 207ns  
-    exist() Miss                112ns  |    exist() Miss                114ns  
-    exist() Hit                 190ns  |    exist() Hit                 194ns  
-    unset() Miss                113ns  |    unset() Miss                115ns  
-    unset() Hit                 255ns  |    unset() Hit                 427ns  
-    cache() Insert              172ns  |    cache() Insert              179ns  
-    cache() Evict               221ns  |    cache() Evict               227ns  
-    cache() Miss                169ns  |    cache() Miss                165ns  
-    cache() Hit                 182ns  |    cache() Hit                 185ns  
+      set() Insert              339ns  |      set() Insert              389ns  
+      set() Reserve             161ns  |      set() Reserve             182ns  
+      set() Update              197ns  |      set() Update              211ns  
+      get() Miss                114ns  |      get() Miss                115ns  
+      get() Hit                 194ns  |      get() Hit                 208ns  
+    exist() Miss                113ns  |    exist() Miss                112ns  
+    exist() Hit                 197ns  |    exist() Hit                 189ns  
+    unset() Miss                112ns  |    unset() Miss                111ns  
+    unset() Hit                 250ns  |    unset() Hit                 423ns  
+    cache() Insert              164ns  |    cache() Insert              184ns  
+    cache() Evict               206ns  |    cache() Evict               225ns  
+    cache() Miss                163ns  |    cache() Miss                166ns  
+    cache() Hit                 183ns  |    cache() Hit                 189ns  
 ===============================================================================
             KEY=16 VALUE=8             |            KEY=16 VALUE=16            
 ---------------------------------------|---------------------------------------
-      set() Insert              428ns  |      set() Insert              481ns  
-      set() Reserve             195ns  |      set() Reserve             226ns  
-      set() Update              229ns  |      set() Update              249ns  
-      get() Miss                123ns  |      get() Miss                123ns  
-      get() Hit                 229ns  |      get() Hit                 249ns  
-    exist() Miss                123ns  |    exist() Miss                122ns  
-    exist() Hit                 200ns  |    exist() Hit                 204ns  
-    unset() Miss                123ns  |    unset() Miss                121ns  
-    unset() Hit                 275ns  |    unset() Hit                 286ns  
-    cache() Insert              191ns  |    cache() Insert              216ns  
-    cache() Evict               239ns  |    cache() Evict               260ns  
-    cache() Miss                179ns  |    cache() Miss                183ns  
-    cache() Hit                 201ns  |    cache() Hit                 209ns  
+      set() Insert              416ns  |      set() Insert              444ns  
+      set() Reserve             189ns  |      set() Reserve             192ns  
+      set() Update              225ns  |      set() Update              240ns  
+      get() Miss                124ns  |      get() Miss                120ns  
+      get() Hit                 221ns  |      get() Hit                 238ns  
+    exist() Miss                122ns  |    exist() Miss                119ns  
+    exist() Hit                 199ns  |    exist() Hit                 205ns  
+    unset() Miss                122ns  |    unset() Miss                119ns  
+    unset() Hit                 458ns  |    unset() Hit                 509ns  
+    cache() Insert              185ns  |    cache() Insert              197ns  
+    cache() Evict               232ns  |    cache() Evict               243ns  
+    cache() Miss                176ns  |    cache() Miss                179ns  
+    cache() Hit                 195ns  |    cache() Hit                 202ns  
 ===============================================================================
             KEY=16 VALUE=32            |            KEY=16 VALUE=64            
 ---------------------------------------|---------------------------------------
-      set() Insert              619ns  |      set() Insert              627ns  
-      set() Reserve             272ns  |      set() Reserve             350ns  
-      set() Update              291ns  |      set() Update              377ns  
-      get() Miss                126ns  |      get() Miss                123ns  
-      get() Hit                 290ns  |      get() Hit                 377ns  
-    exist() Miss                126ns  |    exist() Miss                123ns  
-    exist() Hit                 214ns  |    exist() Hit                 232ns  
-    unset() Miss                125ns  |    unset() Miss                123ns  
-    unset() Hit                 311ns  |    unset() Hit                 370ns  
-    cache() Insert              245ns  |    cache() Insert              318ns  
-    cache() Evict               294ns  |    cache() Evict               353ns  
-    cache() Miss                191ns  |    cache() Miss                170ns  
-    cache() Hit                 219ns  |    cache() Hit                 239ns  
+      set() Insert              527ns  |      set() Insert              521ns  
+      set() Reserve             242ns  |      set() Reserve             324ns  
+      set() Update              268ns  |      set() Update              331ns  
+      get() Miss                125ns  |      get() Miss                122ns  
+      get() Hit                 265ns  |      get() Hit                 328ns  
+    exist() Miss                125ns  |    exist() Miss                120ns  
+    exist() Hit                 217ns  |    exist() Hit                 234ns  
+    unset() Miss                128ns  |    unset() Miss                121ns  
+    unset() Hit                 619ns  |    unset() Hit                 484ns  
+    cache() Insert              226ns  |    cache() Insert              279ns  
+    cache() Evict               263ns  |    cache() Evict               316ns  
+    cache() Miss                185ns  |    cache() Miss                206ns  
+    cache() Hit                 212ns  |    cache() Hit                 224ns  
 ===============================================================================
             KEY=16 VALUE=4096          |            KEY=16 VALUE=65536         
 ---------------------------------------|---------------------------------------
-      set() Insert             7560ns  |      set() Insert            89862ns  
-      set() Reserve            3053ns  |      set() Reserve           36458ns  
-      set() Update             1818ns  |      set() Update            28266ns  
-      get() Miss                217ns  |      get() Miss                208ns  
-      get() Hit                 974ns  |      get() Hit                8795ns  
-    exist() Miss                153ns  |    exist() Miss                194ns  
-    exist() Hit                 285ns  |    exist() Hit                 337ns  
-    unset() Miss                178ns  |    unset() Miss                 84ns  
-    unset() Hit                1526ns  |    unset() Hit               16412ns  
-    cache() Insert             2092ns  |    cache() Insert            27629ns  
-    cache() Evict              1779ns  |    cache() Evict             25393ns  
-    cache() Miss                159ns  |    cache() Miss                200ns  
-    cache() Hit                 244ns  |    cache() Hit                 271ns  
+      set() Insert             6264ns  |      set() Insert            80181ns  
+      set() Reserve            2172ns  |      set() Reserve           23874ns  
+      set() Update             1535ns  |      set() Update            20602ns  
+      get() Miss                155ns  |      get() Miss                204ns  
+      get() Hit                 863ns  |      get() Hit                7758ns  
+    exist() Miss                148ns  |    exist() Miss                186ns  
+    exist() Hit                 272ns  |    exist() Hit                 343ns  
+    unset() Miss                130ns  |    unset() Miss                150ns  
+    unset() Hit                1228ns  |    unset() Hit               13332ns  
+    cache() Insert             1767ns  |    cache() Insert            20791ns  
+    cache() Evict              1486ns  |    cache() Evict             20552ns  
+    cache() Miss                201ns  |    cache() Miss                243ns  
+    cache() Hit                 266ns  |    cache() Hit                 318ns  
 ===============================================================================
             KEY=32 VALUE=0             |            KEY=32 VALUE=4             
 ---------------------------------------|---------------------------------------
-      set() Insert              615ns  |      set() Insert              635ns  
-      set() Reserve             254ns  |      set() Reserve             279ns  
-      set() Update              289ns  |      set() Update              312ns  
-      get() Miss                174ns  |      get() Miss                158ns  
-      get() Hit                 290ns  |      get() Hit                 306ns  
-    exist() Miss                157ns  |    exist() Miss                158ns  
-    exist() Hit                 284ns  |    exist() Hit                 286ns  
-    unset() Miss                157ns  |    unset() Miss                158ns  
-    unset() Hit                 376ns  |    unset() Hit                 379ns  
-    cache() Insert              249ns  |    cache() Insert              264ns  
-    cache() Evict               296ns  |    cache() Evict               314ns  
-    cache() Miss                226ns  |    cache() Miss                227ns  
-    cache() Hit                 282ns  |    cache() Hit                 283ns  
+      set() Insert              526ns  |      set() Insert              549ns  
+      set() Reserve             239ns  |      set() Reserve             251ns  
+      set() Update              295ns  |      set() Update              302ns  
+      get() Miss                160ns  |      get() Miss                161ns  
+      get() Hit                 293ns  |      get() Hit                 302ns  
+    exist() Miss                158ns  |    exist() Miss                158ns  
+    exist() Hit                 281ns  |    exist() Hit                 282ns  
+    unset() Miss                159ns  |    unset() Miss                158ns  
+    unset() Hit                 590ns  |    unset() Hit                 616ns  
+    cache() Insert              239ns  |    cache() Insert              249ns  
+    cache() Evict               272ns  |    cache() Evict               282ns  
+    cache() Miss                217ns  |    cache() Miss                224ns  
+    cache() Hit                 271ns  |    cache() Hit                 277ns  
 ===============================================================================
             KEY=32 VALUE=8             |            KEY=32 VALUE=16            
 ---------------------------------------|---------------------------------------
-      set() Insert              670ns  |      set() Insert              715ns  
-      set() Reserve             294ns  |      set() Reserve             315ns  
-      set() Update              324ns  |      set() Update              346ns  
-      get() Miss                161ns  |      get() Miss                164ns  
-      get() Hit                 318ns  |      get() Hit                 342ns  
-    exist() Miss                161ns  |    exist() Miss                164ns  
-    exist() Hit                 290ns  |    exist() Hit                 293ns  
-    unset() Miss                161ns  |    unset() Miss                163ns  
-    unset() Hit                 387ns  |    unset() Hit                 399ns  
-    cache() Insert              274ns  |    cache() Insert              290ns  
-    cache() Evict               328ns  |    cache() Evict               341ns  
-    cache() Miss                234ns  |    cache() Miss                233ns  
-    cache() Hit                 288ns  |    cache() Hit                 291ns  
+      set() Insert              562ns  |      set() Insert              625ns  
+      set() Reserve             244ns  |      set() Reserve             277ns  
+      set() Update              316ns  |      set() Update              325ns  
+      get() Miss                164ns  |      get() Miss                162ns  
+      get() Hit                 314ns  |      get() Hit                 325ns  
+    exist() Miss                161ns  |    exist() Miss                159ns  
+    exist() Hit                 290ns  |    exist() Hit                 291ns  
+    unset() Miss                162ns  |    unset() Miss                159ns  
+    unset() Hit                 646ns  |    unset() Hit                 693ns  
+    cache() Insert              243ns  |    cache() Insert              261ns  
+    cache() Evict               290ns  |    cache() Evict               301ns  
+    cache() Miss                227ns  |    cache() Miss                226ns  
+    cache() Hit                 277ns  |    cache() Hit                 283ns  
 ===============================================================================
             KEY=32 VALUE=32            |            KEY=32 VALUE=64            
 ---------------------------------------|---------------------------------------
-      set() Insert              821ns  |      set() Insert              852ns  
-      set() Reserve             335ns  |      set() Reserve             423ns  
-      set() Update              378ns  |      set() Update              455ns  
-      get() Miss                163ns  |      get() Miss                160ns  
-      get() Hit                 374ns  |      get() Hit                 454ns  
-    exist() Miss                163ns  |    exist() Miss                159ns  
-    exist() Hit                 298ns  |    exist() Hit                 306ns  
-    unset() Miss                165ns  |    unset() Miss                160ns  
-    unset() Hit                 418ns  |    unset() Hit                 465ns  
-    cache() Insert              324ns  |    cache() Insert              403ns  
-    cache() Evict               367ns  |    cache() Evict               422ns  
-    cache() Miss                236ns  |    cache() Miss                198ns  
-    cache() Hit                 294ns  |    cache() Hit                 277ns  
+      set() Insert              685ns  |      set() Insert              739ns  
+      set() Reserve             308ns  |      set() Reserve             356ns  
+      set() Update              348ns  |      set() Update              399ns  
+      get() Miss                161ns  |      get() Miss                154ns  
+      get() Hit                 347ns  |      get() Hit                 398ns  
+    exist() Miss                163ns  |    exist() Miss                154ns  
+    exist() Hit                 296ns  |    exist() Hit                 304ns  
+    unset() Miss                162ns  |    unset() Miss                155ns  
+    unset() Hit                 799ns  |    unset() Hit                 662ns  
+    cache() Insert              276ns  |    cache() Insert              360ns  
+    cache() Evict               322ns  |    cache() Evict               376ns  
+    cache() Miss                231ns  |    cache() Miss                272ns  
+    cache() Hit                 289ns  |    cache() Hit                 299ns  
 ===============================================================================
             KEY=32 VALUE=4096          |            KEY=32 VALUE=65536         
 ---------------------------------------|---------------------------------------
-      set() Insert             7329ns  |      set() Insert            67493ns  
-      set() Reserve            2333ns  |      set() Reserve           28302ns  
-      set() Update             1615ns  |      set() Update            21012ns  
-      get() Miss                198ns  |      get() Miss                239ns  
-      get() Hit                 957ns  |      get() Hit                7916ns  
-    exist() Miss                187ns  |    exist() Miss                230ns  
-    exist() Hit                 355ns  |    exist() Hit                 392ns  
-    unset() Miss                177ns  |    unset() Miss                124ns  
-    unset() Hit                1244ns  |    unset() Hit               13428ns  
-    cache() Insert             1720ns  |    cache() Insert            23512ns  
-    cache() Evict              1512ns  |    cache() Evict             20536ns  
-    cache() Miss                193ns  |    cache() Miss                238ns  
-    cache() Hit                 283ns  |    cache() Hit                 328ns  
+      set() Insert             6761ns  |      set() Insert            78095ns  
+      set() Reserve            2309ns  |      set() Reserve           23743ns  
+      set() Update             1611ns  |      set() Update            20693ns  
+      get() Miss                202ns  |      get() Miss                250ns  
+      get() Hit                 952ns  |      get() Hit                7802ns  
+    exist() Miss                190ns  |    exist() Miss                227ns  
+    exist() Hit                 354ns  |    exist() Hit                 444ns  
+    unset() Miss                174ns  |    unset() Miss                199ns  
+    unset() Hit                1383ns  |    unset() Hit               13594ns  
+    cache() Insert             1868ns  |    cache() Insert            20883ns  
+    cache() Evict              1530ns  |    cache() Evict             20565ns  
+    cache() Miss                246ns  |    cache() Miss                295ns  
+    cache() Hit                 339ns  |    cache() Hit                 401ns  
 ===============================================================================
             KEY=64 VALUE=0             |            KEY=64 VALUE=4             
 ---------------------------------------|---------------------------------------
-      set() Insert             1100ns  |      set() Insert             1140ns  
-      set() Reserve             433ns  |      set() Reserve             457ns  
-      set() Update              468ns  |      set() Update              479ns  
-      get() Miss                244ns  |      get() Miss                248ns  
-      get() Hit                 467ns  |      get() Hit                 480ns  
-    exist() Miss                243ns  |    exist() Miss                246ns  
-    exist() Hit                 455ns  |    exist() Hit                 457ns  
-    unset() Miss                245ns  |    unset() Miss                248ns  
-    unset() Hit                 578ns  |    unset() Hit                 583ns  
-    cache() Insert              421ns  |    cache() Insert              443ns  
-    cache() Evict               460ns  |    cache() Evict               451ns  
-    cache() Miss                331ns  |    cache() Miss                257ns  
-    cache() Hit                 448ns  |    cache() Hit                 380ns  
+      set() Insert              947ns  |      set() Insert              961ns  
+      set() Reserve             378ns  |      set() Reserve             370ns  
+      set() Update              463ns  |      set() Update              471ns  
+      get() Miss                240ns  |      get() Miss                236ns  
+      get() Hit                 465ns  |      get() Hit                 471ns  
+    exist() Miss                239ns  |    exist() Miss                236ns  
+    exist() Hit                 452ns  |    exist() Hit                 452ns  
+    unset() Miss                240ns  |    unset() Miss                237ns  
+    unset() Hit                 628ns  |    unset() Hit                 650ns  
+    cache() Insert              386ns  |    cache() Insert              383ns  
+    cache() Evict               407ns  |    cache() Evict               412ns  
+    cache() Miss                315ns  |    cache() Miss                323ns  
+    cache() Hit                 432ns  |    cache() Hit                 437ns  
 ===============================================================================
             KEY=64 VALUE=8             |            KEY=64 VALUE=16            
 ---------------------------------------|---------------------------------------
-      set() Insert             1212ns  |      set() Insert              906ns  
-      set() Reserve             850ns  |      set() Reserve             483ns  
-      set() Update              483ns  |      set() Update              522ns  
-      get() Miss                244ns  |      get() Miss                241ns  
-      get() Hit                 484ns  |      get() Hit                 523ns  
-    exist() Miss                242ns  |    exist() Miss                239ns  
-    exist() Hit                 454ns  |    exist() Hit                 474ns  
-    unset() Miss                244ns  |    unset() Miss                243ns  
-    unset() Hit                 582ns  |    unset() Hit                 613ns  
-    cache() Insert              445ns  |    cache() Insert              454ns  
-    cache() Evict               463ns  |    cache() Evict               482ns  
-    cache() Miss                258ns  |    cache() Miss                267ns  
-    cache() Hit                 387ns  |    cache() Hit                 401ns  
+      set() Insert             1008ns  |      set() Insert              837ns  
+      set() Reserve             378ns  |      set() Reserve             439ns  
+      set() Update              478ns  |      set() Update              501ns  
+      get() Miss                235ns  |      get() Miss                231ns  
+      get() Hit                 475ns  |      get() Hit                 498ns  
+    exist() Miss                235ns  |    exist() Miss                230ns  
+    exist() Hit                 451ns  |    exist() Hit                 466ns  
+    unset() Miss                236ns  |    unset() Miss                230ns  
+    unset() Hit                 674ns  |    unset() Hit                 720ns  
+    cache() Insert              376ns  |    cache() Insert              390ns  
+    cache() Evict               421ns  |    cache() Evict               434ns  
+    cache() Miss                338ns  |    cache() Miss                353ns  
+    cache() Hit                 444ns  |    cache() Hit                 448ns  
 ===============================================================================
             KEY=64 VALUE=32            |            KEY=64 VALUE=64            
 ---------------------------------------|---------------------------------------
-      set() Insert             1049ns  |      set() Insert             1490ns  
-      set() Reserve             506ns  |      set() Reserve             598ns  
-      set() Update              548ns  |      set() Update              611ns  
-      get() Miss                246ns  |      get() Miss                240ns  
-      get() Hit                 550ns  |      get() Hit                 613ns  
-    exist() Miss                245ns  |    exist() Miss                238ns  
-    exist() Hit                 472ns  |    exist() Hit                 467ns  
-    unset() Miss                249ns  |    unset() Miss                240ns  
-    unset() Hit                 625ns  |    unset() Hit                 646ns  
-    cache() Insert              477ns  |    cache() Insert              562ns  
-    cache() Evict               507ns  |    cache() Evict               579ns  
-    cache() Miss                283ns  |    cache() Miss                319ns  
-    cache() Hit                 423ns  |    cache() Hit                 451ns  
+      set() Insert              929ns  |      set() Insert             1293ns  
+      set() Reserve             438ns  |      set() Reserve             516ns  
+      set() Update              511ns  |      set() Update              555ns  
+      get() Miss                227ns  |      get() Miss                231ns  
+      get() Hit                 507ns  |      get() Hit                 553ns  
+    exist() Miss                227ns  |    exist() Miss                227ns  
+    exist() Hit                 459ns  |    exist() Hit                 457ns  
+    unset() Miss                227ns  |    unset() Miss                229ns  
+    unset() Hit                 821ns  |    unset() Hit                 688ns  
+    cache() Insert              440ns  |    cache() Insert              479ns  
+    cache() Evict               460ns  |    cache() Evict               485ns  
+    cache() Miss                386ns  |    cache() Miss                302ns  
+    cache() Hit                 454ns  |    cache() Hit                 435ns  
 ===============================================================================
             KEY=64 VALUE=4096          |            KEY=64 VALUE=65536         
 ---------------------------------------|---------------------------------------
-      set() Insert             7702ns  |      set() Insert            73799ns  
-      set() Reserve            2531ns  |      set() Reserve           24950ns  
-      set() Update             1805ns  |      set() Update            21224ns  
-      get() Miss                278ns  |      get() Miss                321ns  
-      get() Hit                1179ns  |      get() Hit                8131ns  
-    exist() Miss                269ns  |    exist() Miss                320ns  
-    exist() Hit                 527ns  |    exist() Hit                 554ns  
-    unset() Miss                259ns  |    unset() Miss                209ns  
-    unset() Hit                1462ns  |    unset() Hit               13601ns  
-    cache() Insert             1878ns  |    cache() Insert            25262ns  
-    cache() Evict              1666ns  |    cache() Evict             20664ns  
-    cache() Miss                269ns  |    cache() Miss                311ns  
-    cache() Hit                 421ns  |    cache() Hit                 452ns  
+      set() Insert             7004ns  |      set() Insert            81742ns  
+      set() Reserve            2502ns  |      set() Reserve           24197ns  
+      set() Update             1776ns  |      set() Update            20955ns  
+      get() Miss                268ns  |      get() Miss                326ns  
+      get() Hit                1166ns  |      get() Hit                8035ns  
+    exist() Miss                259ns  |    exist() Miss                297ns  
+    exist() Hit                 515ns  |    exist() Hit                 592ns  
+    unset() Miss                249ns  |    unset() Miss                266ns  
+    unset() Hit                1490ns  |    unset() Hit               13617ns  
+    cache() Insert             2004ns  |    cache() Insert            21043ns  
+    cache() Evict              1671ns  |    cache() Evict             20711ns  
+    cache() Miss                336ns  |    cache() Miss                383ns  
+    cache() Hit                 492ns  |    cache() Hit                 551ns  
 ```
 
 ## Tests

@@ -8,11 +8,10 @@ var Node = {
 
 var KEY_SIZES = [8, 16, 32, 64];
 var VALUE_SIZES = [0, 4, 8, 16, 32, 64, 4096, 65536];
-var BUFFERS = [4];
 
 // Be careful not to measure swapping to disk (by using too much memory).
 // At the same time, try to exceed the CPU cache to measure cache misses.
-// With 64 MB per positive/negative buffer and with 4 buffers:
+// With 64 MB per positive/negative buffer:
 // 1. We expect a minimum table.size of 32 MB.
 // 2. We expect a minimum tableCache.size of 16 MB.
 var POSITIVE = Node.crypto.randomBytes(64 * 1024 * 1024);
@@ -24,23 +23,19 @@ function average(time, elements) {
   return Math.round(ns / elements);
 }
 
-function benchmark(keySize, valueSize, buffers) {  
+function benchmark(keySize, valueSize) {  
   var results = {};
   var value = Buffer.alloc(valueSize);
   var bucket = HashTable.bucket(keySize, valueSize);
   var element = keySize + valueSize;
-  var elements = Math.min(
-    buffers * HashTable.BUCKETS_MAX * 8 / 2,
-    buffers * Math.floor(HashTable.BUFFER_MAX / bucket) * 8 / 2,
-    Math.floor(POSITIVE.length / element)
-  );
+  var elements = Math.min(Math.floor(POSITIVE.length / element), 1048576);
   if (!Number.isInteger(elements)) {
     throw new Error('elements must be an integer');
   }
 
   // Grow the HashTable through multiple resizes while inserting:
   var time = Node.process.hrtime();
-  var table = new HashTable(keySize, valueSize, buffers, 2);
+  var table = new HashTable(keySize, valueSize, 2, elements);
   var offset = 0;
   for (var index = 0; index < elements; index++) {
     table.set(POSITIVE, offset, POSITIVE, offset + keySize);
@@ -51,7 +46,7 @@ function benchmark(keySize, valueSize, buffers) {
   // Preallocate the HashTable by advising the HashTable of elements in advance:
   // This will avoid resizing the HashTable while inserting.
   var time = Node.process.hrtime();
-  var tableReserve = new HashTable(keySize, valueSize, buffers, elements);
+  var tableReserve = new HashTable(keySize, valueSize, elements, elements);
   var offset = 0;
   for (var index = 0; index < elements; index++) {
     tableReserve.set(POSITIVE, offset, POSITIVE, offset + keySize);
@@ -123,14 +118,10 @@ function benchmark(keySize, valueSize, buffers) {
   results['unset() Hit'] = average(time, elements);
 
   // Cache elements, triggering very few evictions:
+  // HashTable will add capacity, remove this in advance for an exact fit:
+  var exact = Math.floor(elements / (HashTable.capacity(elements) / elements));
   var time = Node.process.hrtime();
-  var tableCache = new HashTable(
-    keySize,
-    valueSize,
-    buffers,
-    0,
-    Math.floor(elements / 8) * bucket
-  );
+  var tableCache = new HashTable(keySize, valueSize, exact, exact);
   var offset = 0;
   for (var index = 0; index < elements; index++) {
     tableCache.cache(POSITIVE, offset, POSITIVE, offset + keySize);
@@ -184,7 +175,7 @@ console.log('');
 console.log(new Array(12 + 1).join(' ') + 'CPU=' + Node.os.cpus()[0].model);
 console.log('');
 
-function display(keySize, valueSize, buffers, results) {
+function display(keySize, valueSize, results) {
   var lines = [];
   lines.push(new Array(39 + 1).join('='));
   var header = 'KEY=' + keySize + ' VALUE=' + valueSize;
@@ -234,16 +225,11 @@ KEY_SIZES.forEach(
   function(keySize) {
     VALUE_SIZES.forEach(
       function(valueSize) {
-        BUFFERS.forEach(
-          function(buffers) {
-            // Discard first result to let optimizations kick in:
-            // We do this for every keySize/valueSize as these have fastpaths.
-            // Warm up using buffers=1 to save time.
-            benchmark(keySize, valueSize, 1);
-            var results = benchmark(keySize, valueSize, buffers);
-            display(keySize, valueSize, buffers, results);
-          }
-        );
+        // Discard first result to let optimizations kick in:
+        // We do this for every keySize/valueSize as these have fastpaths.
+        benchmark(keySize, valueSize);
+        var results = benchmark(keySize, valueSize);
+        display(keySize, valueSize, results);
       }
     );
   }

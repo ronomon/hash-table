@@ -58,36 +58,38 @@ var ENTROPY_OFFSET = 0;
 // Receives value for get():
 var TARGET = Buffer.alloc(65536 * 4);
 
-function Test(keySize, valueSize, buffers, many, cache) {
+function Test(keySize, valueSize, many, cache) {
   Assert('Number.isInteger(keySize)', Number.isInteger(keySize), true);
   Assert('Number.isInteger(valueSize)', Number.isInteger(valueSize), true);
-  Assert('Number.isInteger(buffers)', Number.isInteger(buffers), true);
   Assert('many', many === true || many === false, true);
   Assert('cache', cache === true || cache === false, true);
   var key = keySize <= 16 ? KEY_SEQ : KEY_RND;
   var value = VALUE;
   var bucket = HashTable.bucket(keySize, valueSize);
   var max = Math.floor(Math.min(
-    buffers * HashTable.BUCKETS_MAX * 8 / 3,
-    buffers * Math.floor(HashTable.BUFFER_MAX / bucket) * 8 / 3,
     key.length / keySize,
     value.length / valueSize,
-    many ? 1024 * 1024 : 64
+    many ? (Math.random() < 0.5 ? 1048576 : 65536) : 64
   ));
   var elements = Math.floor(Math.random() * max) || max;
   Assert('Number.isInteger(elements)', Number.isInteger(elements), true);
   Assert('elements > 0', elements > 0, true);
-  if (Math.random() < 0.6) {
-    var minElements = 2;
-    var minSize = 0;
+  if (Math.random() < 0.3) {
+    var elementsMin = 0;
   } else if (Math.random() < 0.2) {
-    var minElements = Math.floor(Math.random() * elements);
-    var minSize = 0;
+    var elementsMin = Math.round(elements * 1.2);
   } else {
-    var minElements = 0;
-    var minSize = Math.floor(Math.random() * elements * (keySize + valueSize));
+    var elementsMin = Math.floor(Math.random() * elements);
   }
-  var table = new HashTable(keySize, valueSize, buffers, minElements, minSize);
+  if (Math.random() < 0.3) {
+    var elementsMax = 0;
+  } else if (Math.random() < 0.05) {
+    var elementsMax = HashTable.ELEMENTS_MAX;
+  } else {
+    var elementsMax = elementsMin + Math.floor(Math.random() * elements);
+  }
+  var table = new HashTable(keySize, valueSize, elementsMin, elementsMax);
+  Assert('table.capacity >= elementsMin', table.capacity >= elementsMin, true);
   var tableLength = 0;
   var state = Buffer.alloc(elements);
   var leader = true;
@@ -95,9 +97,9 @@ function Test(keySize, valueSize, buffers, many, cache) {
   if (Debug) Log(BAR_DOUBLE);
   Log(
     'HashTable:' +
-    ' keySize=' + keySize.toString().padEnd(6, ' ') +
+    ' keySize=' + keySize.toString().padEnd(3, ' ') +
     ' valueSize=' + valueSize.toString().padEnd(6, ' ') +
-    ' buffers=' + buffers.toString().padEnd(6, ' ') +
+    ' buffers=' + table.tables.length.toString().padEnd(5, ' ') +
     ' elements=' + elements
   );
   if (Debug) Log(BAR_DOUBLE);
@@ -313,8 +315,6 @@ function Test(keySize, valueSize, buffers, many, cache) {
   'BUFFERS_MAX',
   'ELEMENTS_MIN',
   'ELEMENTS_MAX',
-  'SIZE_MIN',
-  'SIZE_MAX',
   'BUCKETS_MIN',
   'BUCKETS_MAX',
   'BUFFER_MAX'
@@ -329,81 +329,87 @@ function Test(keySize, valueSize, buffers, many, cache) {
 // HashTable must throw exceptions:
 [
   [
-    HashTable.KEY_MIN - 1, 0, 1, 0, 0,
+    HashTable.KEY_MIN - 1, 0, 1, 0,
     'keySize must be at least ' + HashTable.KEY_MIN
   ],
   [
-    HashTable.KEY_MAX + 1, 0, 1, 0, 0,
+    HashTable.KEY_MAX + 1, 0, 1, 0,
     'keySize must be at most ' + HashTable.KEY_MAX
   ],
   [
-    4, HashTable.VALUE_MIN - 1, 1, 0, 0,
+    4, HashTable.VALUE_MIN - 1, 1, 0,
     'valueSize must be at least ' + HashTable.VALUE_MIN
   ],
   [
-    4, HashTable.VALUE_MAX + 1, 1, 0, 0,
+    4, HashTable.VALUE_MAX + 1, 1, 0,
     'valueSize must be at most ' + HashTable.VALUE_MAX
   ],
   [
-    4, 0, HashTable.BUFFERS_MIN - 1, 0, 0,
-    'buffers must be at least ' + HashTable.BUFFERS_MIN
+    4, 0, HashTable.ELEMENTS_MIN - 1, 0,
+    'elementsMin must be at least ' + HashTable.ELEMENTS_MIN
   ],
   [
-    4, 0, HashTable.BUFFERS_MAX + 1, 0, 0,
-    'buffers must be at most ' + HashTable.BUFFERS_MAX
+    4, 0, HashTable.ELEMENTS_MAX + 1, 0,
+    'elementsMin must be at most ' + HashTable.ELEMENTS_MAX
   ],
   [
-    4, 0, HashTable.BUFFERS_MIN + 5, 0, 0,
-    'buffers must be a power of 2'
+    4, 0, 123, 122,
+    'elementsMax must be at least 123'
   ],
   [
-    4, 0, 1, HashTable.ELEMENTS_MIN - 1, 0,
-    'elements must be at least ' + HashTable.ELEMENTS_MIN
+    4, 0, 1, HashTable.ELEMENTS_MAX + 1,
+    'elementsMax must be at most ' + HashTable.ELEMENTS_MAX
   ],
   [
-    4, 0, 1, HashTable.ELEMENTS_MAX + 1, 0,
-    'elements must be at most ' + HashTable.ELEMENTS_MAX
-  ],
-  [
-    4, 0, 1, 0, HashTable.SIZE_MIN - 1,
-    'size must be at least ' + HashTable.SIZE_MIN
-  ],
-  [
-    4, 0, 1, 0, HashTable.SIZE_MAX + 1,
-    'size must be at most ' + HashTable.SIZE_MAX
-  ],
-  [
-    HashTable.KEY_MIN + 1, 0, 1, 0, 0,
+    HashTable.KEY_MIN + 1, 0, 1, 0,
     'keySize must be a multiple of 4'
   ],
   [
-    4, 65536, 1, 1024 * 1024 * 1024, 0,
+    4, 65536, 1024 * 1024 * 1024, 0,
     HashTable.ERROR_MAXIMUM_CAPACITY_EXCEEDED
   ]
 ].forEach(
   function(args) {
-    Assert('args.length === 6', args.length === 6, true);
+    Assert('args.length === 5', args.length === 5, true);
     var error;
     try {
       var keySize = args[0];
       var valueSize = args[1];
-      var buffers = args[2];
-      var elements = args[3];
-      var size = args[4];
-      new HashTable(keySize, valueSize, buffers, elements, size);
+      var elementsMin = args[2];
+      var elementsMax = args[3];
+      new HashTable(keySize, valueSize, elementsMin, elementsMax);
     } catch (exception) {
       error = exception.message;
     }
-    Assert('error', error, args[5]);
+    Assert('error', error, args[4]);
   }
 );
 
 // Values used by README must match constants:
-Assert('README KEY_MAX', 64, HashTable.KEY_MAX);
-Assert('README VALUE_MAX', 64 * 1024 * 1024, HashTable.VALUE_MAX);
-Assert('README BUFFERS_MAX', 8192, HashTable.BUFFERS_MAX);
-Assert('README ELEMENTS_MAX', 68719476736, HashTable.ELEMENTS_MAX);
-Assert('README SIZE_MAX', 1024 * 1024 * 1024 * 1024, HashTable.SIZE_MAX);
+Assert('README a maximum of 64 bytes', 64, HashTable.KEY_MAX);
+Assert('README a maximum of 1 MB', 1024 * 1024, HashTable.VALUE_MAX);
+Assert('README 4,294,967,296 elements', 4294967296, HashTable.ELEMENTS_MAX);
+Assert('README 16 TB', 17592186044416, HashTable.BUFFERS_MAX * 2147483648);
+
+// Maximum load factor must not be artificially restricted by too few buckets:
+(function() {
+  var elements = HashTable.BUCKETS_MAX * 8;
+  var keySize = HashTable.KEY_MIN;
+  while (keySize <= HashTable.KEY_MAX) {
+    var valueSize = HashTable.VALUE_MIN;
+    while (valueSize <= HashTable.VALUE_MAX) {
+      var elements = HashTable.BUCKETS_MAX * 8;
+      while (elements < HashTable.ELEMENTS_MAX) {
+        var buffers = HashTable.buffers(keySize, valueSize, elements);
+        var buckets = HashTable.buckets(elements, buffers);
+        Assert('buckets >= 64', buckets >= 64, true);
+        elements = elements * 2;
+      }
+      valueSize = valueSize === 0 ? 1 : valueSize * 2;
+    }
+    keySize += 4;
+  }
+})();
 
 var KEY_SIZES = [4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 44, 48, 52, 56, 60, 64];
 Assert('KEY_SIZES[0]', KEY_SIZES[0], HashTable.KEY_MIN);
@@ -421,8 +427,6 @@ Assert(
   true
 );
 
-var BUFFERS = [1, 2, 4, 8, 16, 32, 64, 128, 8192];
-
 var KEY_RND_HASH = Hash(KEY_RND, 0, KEY_RND.length);
 var KEY_SEQ_HASH = Hash(KEY_SEQ, 0, KEY_SEQ.length);
 var ENTROPY_HASH = Hash(ENTROPY, 0, ENTROPY.length);
@@ -433,12 +437,9 @@ KEY_SIZES.forEach(
     var cacheIndex = Math.floor(Math.random() * VALUE_SIZES.length);
     VALUE_SIZES.forEach(
       function(valueSize, valueSizeIndex) {
-        var buffersLength = BUFFERS.length;
-        if (Math.random() < 0.9) buffersLength = Math.min(4, buffersLength);
-        var buffers = BUFFERS[Math.floor(Math.random() * buffersLength)];
         var many = valueSizeIndex === manyIndex && Math.random() < 0.5;
         var cache = valueSizeIndex === cacheIndex;
-        Test(keySize, valueSize, buffers, many, cache);
+        Test(keySize, valueSize, many, cache);
       }
     );
   }
