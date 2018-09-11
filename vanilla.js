@@ -14,7 +14,7 @@ console.log('');
 
 console.log('  @ronomon/hash-table: Inserting ' + elements + ' elements...');
 var now = Date.now();
-var table = new HashTable(keySize, valueSize, 64, elements);
+var table = new HashTable(keySize, valueSize, elements, elements);
 var offset = 0;
 var length = elements;
 while (length--) {
