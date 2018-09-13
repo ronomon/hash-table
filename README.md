@@ -119,7 +119,7 @@ is considerable when inserting millions of elements.
 
 * The [CLOCK LRU eviction algorithm](https://en.wikipedia.org/wiki/Page_replacement_algorithm#Clock)
 is supported at an overhead of 2 bits per element, so that **the hash table can
-be used as a fast user space cache**.
+be used as a fast user-space cache**.
 
 * Surprisingly, the implementation is **written in Javascript** to avoid the
 [100-200ns bridging cost](https://github.com/nodejs/abi-stable-node/issues/327)
@@ -158,8 +158,8 @@ understand and implement, and harder to get wrong.
 in second position, so that **bloom filters can be reset without a runaway
 increase in false positives**.
 
-* Each 8-byte bloom filter is partitioned into 8 subsidary filters, so that
-**bloom filters can be reset with minimal latency**. This further solves the
+* Each 8-byte bloom filter is partitioned into 8 subsidiary filters, so that
+**bloom filters can be reset with minimal latency**. Further, this solves the
 edge case where a key in second position is never removed while other keys are
 churned repeatedly. Without bloom filter partitioning, the bucket's false
 positive rate would approach 100%. With bloom filter partitioning, only 1/8th of
