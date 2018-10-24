@@ -38,7 +38,7 @@ are more serious:
 
 ```
 
-                       keySize=16 valueSize=0
+                       keySize=16 bytes, valueSize=0 bytes
 
   @ronomon/hash-table: Inserting 4000000 elements...
   @ronomon/hash-table: 783ms

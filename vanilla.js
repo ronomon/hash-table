@@ -9,7 +9,7 @@ var element = keySize + valueSize;
 var elements = 4000000;
 var buffer = Node.crypto.randomBytes(element * elements);
 console.log('');
-console.log(' '.repeat(23) + 'keySize=' + keySize + ' valueSize=' + valueSize);
+console.log(' '.repeat(23) + 'keySize=' + keySize + ' bytes, valueSize=' + valueSize + ' bytes');
 console.log('');
 
 console.log('  @ronomon/hash-table: Inserting ' + elements + ' elements...');
