@@ -3,6 +3,13 @@
   "version": "2.0.6",
   "description": "Fast, reliable cuckoo hash table for Node.js",
   "main": "index.js",
+  "files": [
+    "benchmark.js",
+    "index.js",
+    "stress.js",
+    "test.js",
+    "vanilla.js"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/ronomon/hash-table.git"
