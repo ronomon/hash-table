@@ -391,7 +391,6 @@ Table.prototype.cache = function(h1, h2, key, keyOffset, value, valueOffset) {
   // See comments in set():
   var tag = (h1 >> 16) & 255;
   var b1 = (h1 & this.mask) * this.bucket;
-  var b2 = (h2 & this.mask) * this.bucket;
   var f1 = (tag >> 4) & 7;
   var f2 = 1 << (tag & 7);
   if (this.buffer[b1 + f1] & f2) {
