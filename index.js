@@ -471,7 +471,7 @@ Table.prototype.copyValueGeneric = function(s, sO, t, tO) {
     }
     while (size--) t[tO++] = s[sO++];
   } else {
-    s.copy(t, tO, sO, sO + size);
+    this.copy(t, tO, sO, sO + size);
   }
 };
 
