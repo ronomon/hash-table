@@ -225,7 +225,7 @@ HashTable.BUCKETS_MIN = 2;
 HashTable.BUCKETS_MAX = 65536;
 HashTable.BUFFER_MAX = require('buffer').kMaxLength;
 Assert.GE('BUFFER_MAX', HashTable.BUFFER_MAX, 0);
-Assert.LE('BUFFER_MAX', HashTable.BUFFER_MAX, Math.pow(2, 32) - 1);
+Assert.LE('BUFFER_MAX', HashTable.BUFFER_MAX, Math.pow(2, 32));
 Assert.LE(
   'ELEMENTS_MAX',
   HashTable.ELEMENTS_MAX,
